@@ -1,0 +1,90 @@
+fileversion: 3
+robots:
+  cf1:
+    enabled: true
+    uri: radio://0/80/2M/E7E7E7E701
+    initial_position:
+    - 0.0
+    - 0.0
+    - 0.0
+    type: cf21
+  cf2:
+    enabled: true
+    uri: radio://0/80/2M/E7E7E7E702
+    initial_position:
+    - 1.0
+    - 0.0
+    - 0.0
+    type: cf21
+  cf3:
+    enabled: true
+    uri: radio://0/80/2M/E7E7E7E703
+    initial_position:
+    - 2.0
+    - 0.0
+    - 0.0
+    type: cf21
+  cf4:
+    enabled: true
+    uri: radio://0/80/2M/E7E7E7E704
+    initial_position:
+    - 0.0
+    - 1.0
+    - 0.0
+    type: cf21
+  cf5:
+    enabled: true
+    uri: radio://0/80/2M/E7E7E7E705
+    initial_position:
+    - 1.0
+    - 1.0
+    - 0.0
+    type: cf21
+  cf6:
+    enabled: true
+    uri: radio://0/80/2M/E7E7E7E706
+    initial_position:
+    - 2.0
+    - 1.0
+    - 0.0
+    type: cf21
+robot_types:
+  cf21:
+    motion_capture:
+      tracking: librigidbodytracker
+      marker: default_single_marker
+      dynamics: default
+    big_quad: false
+    battery:
+      voltage_warning: 3.8
+      voltage_critical: 3.7
+  cf21_mocap_deck:
+    motion_capture:
+      tracking: librigidbodytracker
+      marker: mocap_deck
+      dynamics: default
+    big_quad: false
+    battery:
+      voltage_warning: 3.8
+      voltage_critical: 3.7
+all:
+  firmware_logging:
+    enabled: true
+    default_topics:
+      pose:
+        frequency: 10
+      status:
+        frequency: 1
+  firmware_params:
+    commander:
+      enHighLevel: 1
+    stabilizer:
+      estimator: 2
+      controller: 2
+    locSrv:
+      extPosStdDev: 1e-3
+      extQuatStdDev: 0.05
+  reference_frame: world
+  broadcasts:
+    num_repeats: 15
+    delay_between_repeats_ms: 1

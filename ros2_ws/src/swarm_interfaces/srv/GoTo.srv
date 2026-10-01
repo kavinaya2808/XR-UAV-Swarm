@@ -1,0 +1,14 @@
+# /swarm/go_to — send one drone or a group to target positions.
+#
+# drone_ids: drones to move (empty = all drones)
+# targets:   one target per drone, in the same order (world frame, m)
+#            if relative=true, a single target is applied as the same
+#            offset to every listed drone (move the group together)
+# duration:  seconds; 0 = automatic from max_speed
+string[] drone_ids
+geometry_msgs/Point[] targets
+bool relative
+float32 duration
+---
+bool success
+string message

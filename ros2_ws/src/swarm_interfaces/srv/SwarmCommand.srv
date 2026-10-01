@@ -1,0 +1,11 @@
+# Used by /swarm/takeoff and /swarm/land.
+#
+# drone_ids: drones to command (empty = all)
+# height:    takeoff height (m); 0 = default. Ignored for land.
+# duration:  seconds; 0 = default
+string[] drone_ids
+float32 height
+float32 duration
+---
+bool success
+string message

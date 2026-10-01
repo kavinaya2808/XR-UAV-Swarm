@@ -1,0 +1,17 @@
+# /swarm/formation — arrange drones in a shape around a centre point.
+#
+# drone_ids: drones to use (empty = all flying drones)
+# shape:     line | grid | circle | v
+# center:    formation centre in world frame (z = flight height)
+# spacing:   distance between neighbouring drones (m); 0 = default
+# heading:   rotation of the formation around z (rad)
+# duration:  seconds; 0 = automatic from max_speed
+string[] drone_ids
+string shape
+geometry_msgs/Point center
+float32 spacing
+float32 heading
+float32 duration
+---
+bool success
+string message
