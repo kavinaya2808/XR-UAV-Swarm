@@ -1,9 +1,10 @@
-"""One-command bringup: Crazyswarm2 (sim) + rosbridge for Unity + swarm_commander.
+"""One-command bringup: Crazyswarm2 (sim) + rosbridge + swarm_commander + swarm_telemetry.
 
     ros2 launch swarm_control swarm_bringup.launch.py
     ros2 launch swarm_control swarm_bringup.launch.py rviz:=True port:=9090
     ros2 launch swarm_control swarm_bringup.launch.py crazyflies_yaml_file:=/path/to/other.yaml
     ros2 launch swarm_control swarm_bringup.launch.py commander:=False
+    ros2 launch swarm_control swarm_bringup.launch.py telemetry:=False
 """
 import os
 
@@ -45,6 +46,16 @@ def generate_launch_description():
             'commander_params',
             default_value=os.path.join(swarm_share, 'config', 'swarm_commander.yaml'),
             description='swarm_commander parameter file'),
+        DeclareLaunchArgument(
+            'telemetry', default_value='True', description='Start swarm_telemetry'),
+        DeclareLaunchArgument(
+            'telemetry_params',
+            default_value=os.path.join(swarm_share, 'config', 'swarm_telemetry.yaml'),
+            description='swarm_telemetry parameter file'),
+        DeclareLaunchArgument(
+            'limits_params',
+            default_value=os.path.join(swarm_share, 'config', 'swarm_limits.yaml'),
+            description='Fence + min separation shared by commander and telemetry'),
     ]
 
     crazyswarm = IncludeLaunchDescription(
@@ -76,9 +87,27 @@ def generate_launch_description():
             name='swarm_commander',
             output='screen',
             emulate_tty=True,
+            respawn=True,             # restart after a crash (phases re-sync from /tf)
+            respawn_delay=2.0,
             condition=IfCondition(LaunchConfiguration('commander')),
             parameters=[
+                LaunchConfiguration('limits_params'),
                 LaunchConfiguration('commander_params'),
+                {'crazyflies_yaml_file': LaunchConfiguration('crazyflies_yaml_file')},
+            ],
+        ),
+        Node(
+            package='swarm_control',
+            executable='swarm_telemetry',
+            name='swarm_telemetry',
+            output='screen',
+            emulate_tty=True,
+            respawn=True,             # restart after a crash (phases re-sync from /tf)
+            respawn_delay=2.0,
+            condition=IfCondition(LaunchConfiguration('telemetry')),
+            parameters=[
+                LaunchConfiguration('limits_params'),
+                LaunchConfiguration('telemetry_params'),
                 {'crazyflies_yaml_file': LaunchConfiguration('crazyflies_yaml_file')},
             ],
         ),

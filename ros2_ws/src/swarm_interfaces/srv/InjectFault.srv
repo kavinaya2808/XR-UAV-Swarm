@@ -1,0 +1,21 @@
+# /swarm/inject_fault — simulate problems to test warnings, faults and the MR UI.
+#
+# fault (case-insensitive):
+#   battery        set battery to `value` percent (e.g. 20 -> low, 10 -> critical, 3 -> depleted)
+#   battery_drain  drain `value` times faster (default 10)
+#   link_weak      hold link quality around `value` (default 0.3)
+#   link_loss      link lost: data freezes, FAULT_LINK_LOST
+#   motor          FAULT_MOTOR
+#   sensor         FAULT_SENSOR
+#   position_loss  position stops updating -> stale warning, then FAULT_POSITION_LOST
+#   all            only with active=false: clear every injected fault
+#
+# active=false clears that fault (battery: restore to 100 %).
+
+string[] drone_ids                     # empty = all drones
+string fault
+bool active true
+float32 value                          # optional, see above (0 = default)
+---
+bool success
+string message

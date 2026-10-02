@@ -2,7 +2,7 @@
 <?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
 <package format="3">
   <name>swarm_control</name>
-  <version>0.1.0</version>
+  <version>0.2.0</version>
   <description>Bringup and swarm commander between the Unity MR UI and Crazyswarm2 (MSc thesis: MR UI for UAV swarm control).</description>
   <maintainer email="kavinaya2409@gmail.com">Kavinaya</maintainer>
   <license>MIT</license>

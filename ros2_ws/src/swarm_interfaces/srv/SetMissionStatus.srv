@@ -1,0 +1,12 @@
+# /swarm/set_mission_status — the mission layer (search planner, return-to-home)
+# tells telemetry what a drone is doing, so DroneState.status shows it.
+#
+# status: searching | returning | none (none = plain flying/idle)
+# Only applied to airborne drones; cleared automatically when the drone lands.
+# A fault always wins: a faulted drone reports status "fault".
+
+string[] drone_ids                     # empty = all drones
+string status
+---
+bool success
+string message

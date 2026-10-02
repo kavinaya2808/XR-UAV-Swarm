@@ -1,0 +1,36 @@
+# Parameters for the swarm_telemetry node (/swarm/state).
+# Fence + min_separation: config/swarm_limits.yaml.
+# Write every number with a decimal point (100.0, not 100) — ROS 2 rejects ints for doubles.
+swarm_telemetry:
+  ros__parameters:
+    world_frame: world
+    rate: 10.0                # Hz
+
+    # Battery (simulated; Crazyflie 2.1 hovers ~7 min on its 250 mAh 1S LiPo)
+    initial_battery: 100.0    # %
+    hover_endurance: 420.0    # s from 100 % to 0 % while hovering
+    move_drain_factor: 0.3    # extra drain per m/s of speed (x hover drain)
+    idle_drain: 0.005         # %/s on the ground
+    drain_scale: 1.0          # >1 = faster drain for testing (e.g. 5.0)
+    recharge_on_ground: true  # sim: landing = battery swap (false = realistic, no recharge)
+    recharge_rate: 5.0        # %/s -> empty to full in 20 s on the ground
+    battery_low: 30.0         # % -> warning
+    battery_critical: 15.0    # % -> warning, takeoff refused
+    battery_depleted: 3.0     # % -> fault
+
+    # Radio link (simulated, distance from the ground station)
+    ground_station: [0.0, 0.0, 0.0]
+    link_good_range: 4.0      # m, quality ~1 inside
+    link_max_range: 12.0      # m, quality 0 beyond
+    link_noise: 0.02
+    link_weak: 0.5            # quality below -> warning
+
+    # Data freshness
+    stale_timeout: 0.5        # s without new position -> warning
+    lost_timeout: 2.0         # s without new position -> fault
+    commander_timeout: 1.0    # s, then flight mode is inferred from motion
+
+    # Motion
+    velocity_filter: 0.5      # low-pass weight of newest velocity sample
+    moving_speed: 0.05        # m/s, above = "moving"
+    ground_height: 0.05       # m, below + slow = "landed" (inferred mode only)

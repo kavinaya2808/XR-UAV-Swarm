@@ -6,14 +6,15 @@ Services (all return success + message, so the UI can show feedback):
     /swarm/go_to      swarm_interfaces/srv/GoTo
     /swarm/formation  swarm_interfaces/srv/Formation
     /swarm/stop       std_srvs/srv/Trigger   (hover in place)
-Topic:
-    /swarm/state      swarm_interfaces/msg/SwarmState
+Topics:
+    /swarm/commander_state  swarm_interfaces/msg/CommanderState  (out: phase + target per drone)
+    /swarm/state            swarm_interfaces/msg/SwarmState      (in: from swarm_telemetry)
 
 Every command passes through the same safety layer: flight volume (fence),
 minimum separation between planned positions, and a speed limit.
+Health gating (if swarm_telemetry runs): drones with a fault cannot take off or
+move, drones with a critical battery cannot take off. Landing is always allowed.
 """
-import math
-
 import rclpy
 import yaml
 from builtin_interfaces.msg import Duration
@@ -24,16 +25,14 @@ from geometry_msgs.msg import Point
 from rclpy.node import Node
 from rclpy.time import Time
 from std_srvs.srv import Trigger
-from swarm_interfaces.msg import DroneState, SwarmState
+from swarm_interfaces.msg import CommanderDrone, CommanderState, DroneState, SwarmState
 from swarm_interfaces.srv import Formation, GoTo, SwarmCommand
 from tf2_ros import Buffer, TransformException, TransformListener
 
+from swarm_control.flight_phase import FLYING, LANDED, LANDING, TAKING_OFF, next_phase
 from swarm_control.geometry import (
-    SHAPES, Fence, assign_slots, check_separation, dist, flight_duration,
-    formation_targets,
+    SHAPES, Fence, assign_slots, check_separation, flight_duration, formation_targets,
 )
-
-LANDED, TAKING_OFF, FLYING, LANDING = 'landed', 'taking_off', 'flying', 'landing'
 
 
 def to_duration(seconds):
@@ -47,8 +46,10 @@ class Drone:
         self.position = tuple(initial_position)
         self.status = LANDED
         self.status_until = 0.0
+        self.takeoff_z = 0.0          # height of the last takeoff command
         self.target = None
         self.target_until = 0.0
+        self.health = None          # (DroneState from /swarm/state, receive time)
         self.cli_takeoff = node.create_client(CfTakeoff, f'/{name}/takeoff')
         self.cli_land = node.create_client(CfLand, f'/{name}/land')
         self.cli_goto = node.create_client(CfGoTo, f'/{name}/go_to')
@@ -56,6 +57,17 @@ class Drone:
     @property
     def airborne(self):
         return self.status != LANDED
+
+    def health_problem(self, now, for_takeoff=False, max_age=2.0):
+        """Reason this drone must not take off / move, or None (no telemetry = no gating)."""
+        if self.health is None or now - self.health[1] > max_age:
+            return None
+        s = self.health[0]
+        if s.faults:
+            return f'{self.id} has a fault ({", ".join(s.alerts) or "fault"})'
+        if for_takeoff and s.warnings & DroneState.WARN_BATTERY_CRITICAL:
+            return f'{self.id} battery critical ({s.battery_percent:.0f}%)'
+        return None
 
     def planned_position(self):
         """Where this drone will be once its current command finishes."""
@@ -86,6 +98,7 @@ class SwarmCommander(Node):
         p('takeoff_duration', 2.0)
         p('land_duration', 2.0)
         p('default_spacing', 0.6)
+        p('health_gating', True)          # use /swarm/state faults / battery
 
         g = self.get_parameter
         self.world = g('world_frame').value
@@ -101,6 +114,7 @@ class SwarmCommander(Node):
         self.takeoff_duration = g('takeoff_duration').value
         self.land_duration = g('land_duration').value
         self.default_spacing = g('default_spacing').value
+        self.health_gating = g('health_gating').value
 
         self.drones = {}
         for name, pos in self._load_drones(g('crazyflies_yaml_file').value):
@@ -111,14 +125,14 @@ class SwarmCommander(Node):
         self.tf_buffer = Buffer()
         self.tf_listener = TransformListener(self.tf_buffer, self)
 
-        self.state_pub = self.create_publisher(SwarmState, '/swarm/state', 10)
+        self.state_pub = self.create_publisher(CommanderState, '/swarm/commander_state', 10)
+        self.create_subscription(SwarmState, '/swarm/state', self._on_swarm_state, 10)
         self.create_service(SwarmCommand, '/swarm/takeoff', self._on_takeoff)
         self.create_service(SwarmCommand, '/swarm/land', self._on_land)
         self.create_service(GoTo, '/swarm/go_to', self._on_go_to)
         self.create_service(Formation, '/swarm/formation', self._on_formation)
         self.create_service(Trigger, '/swarm/stop', self._on_stop)
         self.create_timer(1.0 / g('state_rate').value, self._tick)
-        self._last_sep_warn = 0.0
 
         self.get_logger().info(
             f'swarm_commander ready: {len(self.drones)} drones '
@@ -142,47 +156,40 @@ class SwarmCommander(Node):
     def _tick(self):
         now = self._now()
         for d in self.drones.values():
+            z = None
             try:
                 t = self.tf_buffer.lookup_transform(self.world, d.id, Time())
                 tr = t.transform.translation
                 d.position = (tr.x, tr.y, tr.z)
+                z = tr.z
             except TransformException:
-                pass  # keep last known / initial position
-            if d.status == TAKING_OFF and now >= d.status_until:
-                d.status = FLYING
-            elif d.status == LANDING and now >= d.status_until:
-                d.status = LANDED
-            if d.target is not None and now >= d.target_until:
+                pass  # keep last known / initial position, don't change phase
+            phase, note = next_phase(d.status, now, d.status_until, z, d.takeoff_z)
+            if note:
+                self.get_logger().warn(f'{d.id}: {note}')
+            if phase != d.status:
+                d.status = phase
+                if phase == LANDED:
+                    d.target = None
+            if d.target is not None and now >= d.target_until and d.status == FLYING:
                 d.target = None
 
-        airborne = {d.id: d.position for d in self.drones.values() if d.airborne}
-        min_sep, warn = math.inf, False
-        if len(airborne) >= 2:
-            ok, pair, min_sep = check_separation(airborne, self.min_sep)
-            if not ok:
-                warn = True
-                if now - self._last_sep_warn > 2.0:
-                    self.get_logger().warn(
-                        f'Separation {min_sep:.2f} m between {pair[0]} and {pair[1]} '
-                        f'< {self.min_sep} m')
-                    self._last_sep_warn = now
-
-        msg = SwarmState()
+        # separation monitoring + warnings live in swarm_telemetry (/swarm/state)
+        msg = CommanderState()
         msg.stamp = self.get_clock().now().to_msg()
         for d in self.drones.values():
-            s = DroneState()
-            s.id = d.id
-            s.status = d.status
-            s.position = Point(x=d.position[0], y=d.position[1], z=d.position[2])
-            s.has_target = d.target is not None
+            c = CommanderDrone(id=d.id, phase=d.status, has_target=d.target is not None)
             if d.target is not None:
-                s.target = Point(x=d.target[0], y=d.target[1], z=d.target[2])
-            others = [dist(d.position, o.position) for o in self.drones.values() if o is not d]
-            s.nearest_neighbour = float(min(others)) if others else 0.0
-            msg.drones.append(s)
-        msg.min_separation = float(min_sep) if math.isfinite(min_sep) else 0.0
-        msg.separation_warning = warn
+                c.target = Point(x=d.target[0], y=d.target[1], z=d.target[2])
+            msg.drones.append(c)
         self.state_pub.publish(msg)
+
+    def _on_swarm_state(self, msg):
+        now = self._now()
+        for s in msg.drones:
+            d = self.drones.get(s.id)
+            if d is not None:
+                d.health = (s, now)
 
     # ---------------------------------------------------------------- helpers
     def _resolve(self, ids, default_filter=None):
@@ -199,6 +206,15 @@ class SwarmCommander(Node):
             raise ValueError('duplicate drone ids')
         return [self.drones[i] for i in ids]
 
+    def _healthy(self, d, for_takeoff=False):
+        if not self.health_gating:
+            return None
+        return d.health_problem(self._now(), for_takeoff)
+
+    def _can_move(self, d):
+        """Default selection for go_to / formation: flying and healthy."""
+        return d.status == FLYING and not self._healthy(d)
+
     def _servers_ready(self, drones, attr):
         missing = [d.id for d in drones if not getattr(d, attr).service_is_ready()]
         if missing:
@@ -210,6 +226,9 @@ class SwarmCommander(Node):
         for d in drones:
             if d.status != FLYING:
                 raise ValueError(f'{d.id} is {d.status}; only flying drones can move')
+            problem = self._healthy(d)
+            if problem:
+                raise ValueError(f'{problem}; land it instead')
 
         # 1) fence
         checked = []
@@ -258,15 +277,20 @@ class SwarmCommander(Node):
             height = req.height if req.height > 0 else self.takeoff_height
             height = min(max(height, self.fence.lo[2]), self.fence.hi[2])
             duration = req.duration if req.duration > 0 else self.takeoff_duration
-            now, sent, skipped = self._now(), [], []
+            now, sent, skipped, refused = self._now(), [], [], []
             for d in drones:
                 if d.status != LANDED:
                     skipped.append(d.id)
+                    continue
+                problem = self._healthy(d, for_takeoff=True)
+                if problem:
+                    refused.append(problem)
                     continue
                 r = CfTakeoff.Request(group_mask=0, height=float(height),
                                       duration=to_duration(duration))
                 d.cli_takeoff.call_async(r)
                 d.status, d.status_until = TAKING_OFF, now + duration
+                d.takeoff_z = float(height)
                 d.target = (d.position[0], d.position[1], height)
                 d.target_until = now + duration
                 sent.append(d.id)
@@ -274,6 +298,8 @@ class SwarmCommander(Node):
             res.message = f'takeoff to {height:.2f} m: {", ".join(sent) or "none"}'
             if skipped:
                 res.message += f' (already airborne: {", ".join(skipped)})'
+            if refused:
+                res.message += f' (refused: {"; ".join(refused)})'
         except ValueError as e:
             res.success, res.message = False, str(e)
         self._log(res)
@@ -302,8 +328,7 @@ class SwarmCommander(Node):
 
     def _on_go_to(self, req, res):
         try:
-            drones = self._resolve(list(req.drone_ids),
-                                   default_filter=lambda d: d.status == FLYING)
+            drones = self._resolve(list(req.drone_ids), default_filter=self._can_move)
             self._servers_ready(drones, 'cli_goto')
             pts = [(p.x, p.y, p.z) for p in req.targets]
             if req.relative:
@@ -329,8 +354,7 @@ class SwarmCommander(Node):
             shape = req.shape.strip().lower()
             if shape not in SHAPES:
                 raise ValueError(f'unknown shape "{req.shape}" (use {", ".join(SHAPES)})')
-            drones = self._resolve(list(req.drone_ids),
-                                   default_filter=lambda d: d.status == FLYING)
+            drones = self._resolve(list(req.drone_ids), default_filter=self._can_move)
             self._servers_ready(drones, 'cli_goto')
             spacing = req.spacing if req.spacing > 0 else self.default_spacing
             spacing = max(spacing, self.min_sep)
@@ -364,7 +388,11 @@ class SwarmCommander(Node):
         return res
 
     def _log(self, res):
-        (self.get_logger().info if res.success else self.get_logger().warn)(res.message)
+        # rclpy: one call site must always use the same severity -> two separate calls
+        if res.success:
+            self.get_logger().info(res.message)
+        else:
+            self.get_logger().warn(res.message)
 
 
 def fmt(p):

@@ -1,0 +1,13 @@
+# Safety limits shared by swarm_commander and swarm_telemetry ("/**" = every node).
+# Change them here only, so commands and warnings always agree.
+/**:
+  ros__parameters:
+    # Flight area (m, world frame). 6 drones start on x 0..2, y 0..1.
+    fence:
+      x_min: -1.0
+      x_max: 3.0
+      y_min: -1.0
+      y_max: 2.0
+      z_min: 0.2
+      z_max: 2.0
+    min_separation: 0.3       # m between any two drones

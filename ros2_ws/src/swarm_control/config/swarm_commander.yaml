@@ -1,21 +1,12 @@
 # Parameters for the swarm_commander node.
+# Fence + min_separation: config/swarm_limits.yaml (shared with swarm_telemetry).
 # The drone list is read from crazyflies_yaml_file (set by the launch file).
 swarm_commander:
   ros__parameters:
     world_frame: world
-    state_rate: 10.0          # Hz for /swarm/state
+    state_rate: 10.0          # Hz for /swarm/commander_state
 
-    # Flight area (m, world frame). 6 drones start on x 0..2, y 0..1.
-    fence:
-      x_min: -1.0
-      x_max: 3.0
-      y_min: -1.0
-      y_max: 2.0
-      z_min: 0.2
-      z_max: 2.0
     fence_mode: clamp         # clamp = move target inside, reject = refuse command
-
-    min_separation: 0.3       # m between any two planned positions
     max_speed: 0.5            # m/s, used to stretch durations
     min_duration: 1.0         # s
     sync_group: true          # all drones in one command arrive together
@@ -24,3 +15,5 @@ swarm_commander:
     takeoff_duration: 2.0
     land_duration: 2.0
     default_spacing: 0.6      # m, formations
+
+    health_gating: true       # refuse takeoff/moves for faulted drones (needs swarm_telemetry)

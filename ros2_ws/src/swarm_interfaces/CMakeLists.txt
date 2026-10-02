@@ -9,9 +9,13 @@ find_package(geometry_msgs REQUIRED)
 rosidl_generate_interfaces(${PROJECT_NAME}
   "msg/DroneState.msg"
   "msg/SwarmState.msg"
+  "msg/CommanderDrone.msg"
+  "msg/CommanderState.msg"
   "srv/GoTo.srv"
   "srv/Formation.srv"
   "srv/SwarmCommand.srv"
+  "srv/InjectFault.srv"
+  "srv/SetMissionStatus.srv"
   DEPENDENCIES builtin_interfaces geometry_msgs
 )
 
