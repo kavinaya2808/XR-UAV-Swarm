@@ -54,6 +54,7 @@ public class CrazyflieSwarmSpawner : MonoBehaviour
             if (f.Listener == null) f.Listener = Listener;
             var c = f.GetComponent<CrazyflieCommander>();
             if (c != null) c.EnableKeyboard = false;   // keys go to the whole swarm
+            EnsureIndicator(f.gameObject, f.CfName);
         }
     }
 
@@ -82,7 +83,16 @@ public class CrazyflieSwarmSpawner : MonoBehaviour
             commander.EnableKeyboard = false;   // swarm-wide keys live on CrazyflieSwarmCommander
         }
 
+        EnsureIndicator(go, cfName);
         drones[cfName] = follower;
         Debug.Log($"[Crazyflie] Spawned {cfName} ({drones.Count} drones)");
+    }
+
+    // Status light + label from /swarm/state on every drone (fixed level of detail).
+    private static void EnsureIndicator(GameObject drone, string cfName)
+    {
+        var ind = drone.GetComponent<DroneStatusIndicator>();
+        if (ind == null) ind = drone.AddComponent<DroneStatusIndicator>();
+        ind.CfName = cfName;
     }
 }

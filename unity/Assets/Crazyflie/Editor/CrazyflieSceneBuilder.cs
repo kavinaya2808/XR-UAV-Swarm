@@ -73,6 +73,7 @@ public static class CrazyflieSceneBuilder
         rc.Serializer = RosSocket.SerializerEnum.Newtonsoft_JSON;
         if (string.IsNullOrEmpty(rc.RosBridgeServerUrl)) rc.RosBridgeServerUrl = "ws://localhost:9090";
         if (ros.GetComponent<CrazyflieTfListener>() == null) ros.AddComponent<CrazyflieTfListener>();
+        if (ros.GetComponent<SwarmTelemetryListener>() == null) ros.AddComponent<SwarmTelemetryListener>();
 
         // World root = ROS "world" frame
         var world = FindOrCreate("World", null);
