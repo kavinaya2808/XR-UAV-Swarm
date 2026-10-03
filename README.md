@@ -175,21 +175,6 @@ To update Crazyswarm2 or the firmware: change the `ARG` in `docker/Dockerfile`, 
 
 ---
 
-## Troubleshooting
-
-| Problem | Fix |
-|---|---|
-| `permission denied ... docker.sock` | `sudo usermod -aG docker $USER`, then log out/in (or `newgrp docker`) |
-| `ros2: command not found` | You are on the host — use `./scripts/shell.sh` first |
-| `Package 'swarm_control' not found` | `colcon build --symlink-install && source install/setup.bash` inside the container |
-| rosbridge `[Errno 98] Address already in use` | rosbridge already runs inside `swarm_up.sh` — don't start a second one |
-| `LaunchConfigurationEquals ... deprecated` warning | Comes from Crazyswarm2's launch file; harmless |
-| Unity can't connect | Backend running? Correct IP in RosConnector? Same network? Firewall allows port 9090? |
-| RViz: `could not connect to display` | `xhost +local:docker` on the host |
-| Unity textures/models look broken after clone | Git LFS not installed: `git lfs install && git lfs pull` |
-| Start completely fresh | `docker rm -f xr-swarm && ./scripts/create_container.sh` (your code in `ros2_ws/src` is untouched) |
-
----
 
 ## Acknowledgements
 
@@ -198,6 +183,4 @@ To update Crazyswarm2 or the firmware: change the `ARG` in `docker/Dockerfile`, 
 - [ROS#](https://github.com/siemens/ros-sharp) (Siemens) — Unity ↔ rosbridge client (Apache-2.0; licence kept in its folder under `unity/Assets`)
 - [rosbridge_suite](https://github.com/RobotWebTools/rosbridge_suite)
 
-## Author
 
-Kavinaya — MSc Computer Science, University of Bern
