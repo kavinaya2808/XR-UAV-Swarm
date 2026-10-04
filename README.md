@@ -18,8 +18,10 @@ such as *"fly a circle formation around (1, 0.5, 1)"*, into per-drone commands, 
 them against a safety layer (geofence, minimum separation, speed limit) before anything moves.
 
 
+<img width="400" height="231" alt="ScreenRecording2026-10-02at4 37 24PM2-ezgif com-video-to-gif-converter" src="https://github.com/user-attachments/assets/33054f61-194c-4f32-8834-82706ef442fc" />
 
-<!-- Add a demo GIF here: ![demo](docs/media/demo.gif) -->
+<img width="400" height="231" alt="ScreenRecording2026-10-02at4 37 24PM-ezgif com-video-to-gif-converter" src="https://github.com/user-attachments/assets/a0ded49a-b318-4416-91d4-e35523d6b034" />
+
 
 ---
 
