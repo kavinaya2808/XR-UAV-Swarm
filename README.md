@@ -6,7 +6,6 @@
 ![Crazyswarm2](https://img.shields.io/badge/Crazyswarm2-sim-blue)
 ![Unity](https://img.shields.io/badge/Unity-XR-black?logo=unity)
 ![Docker](https://img.shields.io/badge/Docker-required-2496ED?logo=docker)
-![Level](https://img.shields.io/badge/level-intermediate-orange)
 
 This is a self-contained multi-robot lab project: a swarm of six simulated
 [Crazyflie](https://www.bitcraze.io/products/crazyflie-2-1/) quadrotors runs in
@@ -65,33 +64,47 @@ poses come back on `/tf` and aggregated state on `/swarm/state` → Unity update
 
 ## Repository structure
 
+## Repository structure
+
 ```
 XR-UAV-Swarm/
 ├── README.md
 ├── docker/
-│   └── Dockerfile               # ROS 2 Jazzy + Crazyswarm2 + firmware bindings + rosbridge (versions pinned)
+│   └── Dockerfile                  # ROS 2 Jazzy + Crazyswarm2 + firmware bindings + rosbridge (versions pinned)
 ├── scripts/
-│   ├── build_image.sh           # build the Docker image (once)
-│   ├── create_container.sh      # create the dev container (once)
-│   ├── swarm_up.sh              # ONE command: start container, build, launch everything
-│   └── shell.sh                 # extra terminal inside the container
-├── ros2_ws/                     # ROS 2 workspace (mounted into the container)
+│   ├── build_image.sh              # build the Docker image (once)
+│   ├── create_container.sh         # create the dev container (once)
+│   ├── swarm_up.sh                 # shortcut: start container, build, launch the bringup
+│   └── shell.sh                    # open a terminal inside the container
+├── ros2_ws/                        # ROS 2 workspace (mounted into the container)
 │   └── src/
-│       ├── swarm_interfaces/    # msg: DroneState, SwarmState · srv: GoTo, Formation, SwarmCommand
+│       ├── swarm_interfaces/
+│       │   ├── msg/                # DroneState, SwarmState, CommanderState, CommanderDrone
+│       │   └── srv/                # SwarmCommand, GoTo, Formation, InjectFault, SetMissionStatus
 │       └── swarm_control/
-│           ├── launch/swarm_bringup.launch.py
-│           ├── config/crazyflies_6.yaml       # drone list + initial positions
-│           ├── config/swarm_commander.yaml    # safety limits, speeds, defaults
-│           ├── swarm_control/swarm_commander.py
-│           ├── swarm_control/geometry.py      # formations + safety maths (pure Python)
-│           └── test/
-├── unity/                       # Unity project (open this folder in Unity Hub)
-│   ├── Assets/
-│   ├── Packages/
-│   └── ProjectSettings/
-└── docs/
-    └── dailylogs/               # development log
+│           ├── launch/
+│           │   └── swarm_bringup.launch.py   # sim + rosbridge + commander + telemetry
+│           ├── config/
+│           │   ├── crazyflies_6.yaml         # drone list + initial positions
+│           │   ├── swarm_limits.yaml         # geofence + min separation (shared)
+│           │   ├── swarm_commander.yaml      # speed, durations, formation spacing, health gating
+│           │   └── swarm_telemetry.yaml      # battery, radio link, data freshness, motion thresholds
+│           ├── swarm_control/
+│           │   ├── swarm_commander.py        # node: /swarm/* command services + safety layer
+│           │   ├── swarm_telemetry.py        # node: /swarm/state, fault injection, mission status
+│           │   ├── smoke_test.py             # autonomous end-to-end test flight
+│           │   ├── geometry.py               # formations, slot assignment, fence, separation (pure Python)
+│           │   ├── flight_phase.py           # landed / taking off / flying / landing logic (pure Python)
+│           │   └── telemetry_model.py        # battery, link, warnings, faults model (pure Python)
+│           └── test/                         # pytest unit tests for the pure-Python modules
+└── unity/                          # Unity project (open this folder in Unity Hub)
+    ├── Assets/
+    ├── Packages/
+    └── ProjectSettings/
 ```
+
+The ROS nodes are kept thin: all the logic lives in plain Python modules
+(`geometry.py`, `flight_phase.py`, `telemetry_model.py`), so it can be unit-tested without ROS.
 
 ---
 
@@ -220,42 +233,79 @@ and a message explaining why.
 
 ## Swarm API (Unity ↔ ROS)
 
-| Name | Type | Description |
+### Commands (`swarm_commander`)
+
+| Service | Type | Description |
 |---|---|---|
-| `/swarm/takeoff` | `swarm_interfaces/srv/SwarmCommand` | Take off listed drones (empty = all) |
+| `/swarm/takeoff` | `swarm_interfaces/srv/SwarmCommand` | Take off listed drones (empty = all), optional height and duration |
 | `/swarm/land` | `swarm_interfaces/srv/SwarmCommand` | Land listed drones (empty = all) |
-| `/swarm/go_to` | `swarm_interfaces/srv/GoTo` | One target per drone, or one shared offset (`relative: true`) |
+| `/swarm/go_to` | `swarm_interfaces/srv/GoTo` | One target per drone, or one shared offset for the group (`relative: true`) |
 | `/swarm/formation` | `swarm_interfaces/srv/Formation` | `line`, `grid`, `circle`, `v` around a centre, with spacing + heading |
 | `/swarm/stop` | `std_srvs/srv/Trigger` | All flying drones hover in place |
-| `/swarm/state` | `swarm_interfaces/msg/SwarmState` (10 Hz) | Position, status, target, nearest neighbour per drone + separation warning |
+
+### State and testing (`swarm_telemetry`)
+
+| Name | Type | Description |
+|---|---|---|
+| `/swarm/state` | `swarm_interfaces/msg/SwarmState` (10 Hz) | Per drone: position, velocity, battery, link quality, flight mode, status, target, nearest neighbour, warnings, faults + readable alerts. Plus a swarm summary (airborne / warnings / faults) |
+| `/swarm/inject_fault` | `swarm_interfaces/srv/InjectFault` | Simulate problems: `battery`, `battery_drain`, `link_weak`, `link_loss`, `motor`, `sensor`, `position_loss`. `active: false` clears; `fault: all` clears everything |
+| `/swarm/set_mission_status` | `swarm_interfaces/srv/SetMissionStatus` | Tag airborne drones as `searching`, `returning` or `none` so the UI can show what each one is doing |
+| `/swarm/commander_state` | `swarm_interfaces/msg/CommanderState` | Internal commander state (flight phases, active targets), read by telemetry |
 | `/tf` | `tf2_msgs/msg/TFMessage` | `world → cf1 … cfN` poses from the simulator |
 
-Every service returns `success` + `message` so the UI can show the operator meaningful feedback.
+Every service returns `success` + `message` (e.g. *"cf1 and cf2 would be 0.05 m apart"*) so the UI can show feedback.
+
+**Warnings vs faults:** a *warning* means the drone can still fly but the operator should look
+(low battery, weak link, too close to a neighbour, outside the fence, stale position).
+A *fault* means it must not fly (battery depleted, link lost, motor/sensor failure, position lost).
+A drone with a fault reports status `fault`, and the commander refuses new takeoff and move commands for it.
+
+Example: simulate a motor failure on `cf2`, then clear it:
+
+```bash
+ros2 service call /swarm/inject_fault swarm_interfaces/srv/InjectFault "{drone_ids: [cf2], fault: motor}"
+ros2 service call /swarm/inject_fault swarm_interfaces/srv/InjectFault "{fault: all, active: false}"
+```
 
 ---
 
 ## Safety layer
 
-Configured in `ros2_ws/src/swarm_control/config/swarm_commander.yaml`:
+Every command passes through these checks before any drone moves:
 
-- **Flight volume:** x −1…3 m, y −1…2 m, z 0.2…2 m. Targets outside are clamped, or rejected with `fence_mode: reject`.
-- **Minimum separation:** 0.3 m between planned positions.
-- **Speed limit:** 0.5 m/s. Drones in one command are timed to arrive together.
+- **Flight volume:** x −1…3 m, y −1…2 m, z 0.2…2 m. Targets outside are clamped (`fence_mode: clamp`) or the command is refused (`fence_mode: reject`).
+- **Minimum separation:** 0.3 m between any two planned positions.
+- **Speed limit:** 0.5 m/s. Durations are stretched to respect it, and drones in one command arrive together (`sync_group: true`).
 - **State check:** only flying drones accept go-to / formation commands.
+- **Health gating:** drones with a fault, or with critically low battery, are refused takeoff and moves (`health_gating: true`).
+
+The geofence and minimum separation live in **one shared file**, `swarm_limits.yaml`,
+so the commander (which blocks commands) and telemetry (which raises warnings) always use the same numbers.
 
 ---
 
 ## Configuration
 
-**Change the swarm size:** copy `config/crazyflies_6.yaml` to `config/crazyflies_<N>.yaml`, edit the drone
-list and initial positions, then launch with:
+All files are in `ros2_ws/src/swarm_control/config/`:
+
+| File | What to change there |
+|---|---|
+| `crazyflies_6.yaml` | Drone list and start positions (read by Crazyswarm2, commander and telemetry) |
+| `swarm_limits.yaml` | Geofence and minimum separation |
+| `swarm_commander.yaml` | Max speed, takeoff height, durations, default formation spacing, fence mode, health gating |
+| `swarm_telemetry.yaml` | Simulated battery (endurance, drain, recharge, thresholds), radio link range, stale/lost timeouts |
+
+Thanks to `--symlink-install`, config edits need no rebuild: just restart the bringup.
+In `swarm_telemetry.yaml`, write numbers with a decimal point (`100.0`, not `100`), because ROS 2 rejects integers for float parameters.
+
+**Change the swarm size:** copy `crazyflies_6.yaml` to `crazyflies_<N>.yaml`, edit the drone list, then launch with:
 
 ```bash
-./scripts/swarm_up.sh crazyflies_yaml_file:=/root/ros2_ws/src/swarm_control/config/crazyflies_<N>.yaml
+ros2 launch swarm_control swarm_bringup.launch.py \
+  crazyflies_yaml_file:=/root/ros2_ws/src/swarm_control/config/crazyflies_<N>.yaml
 ```
 
-**Tune limits and speeds:** edit `config/swarm_commander.yaml` (no rebuild needed thanks to `--symlink-install`;
-just restart `swarm_up.sh`).
+**Faster testing:** set `drain_scale: 5.0` in `swarm_telemetry.yaml` to watch the battery warnings appear within a short flight.
 
 ---
 
