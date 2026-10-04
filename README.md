@@ -1,13 +1,36 @@
 # XR-UAV-Swarm
 
-**Mixed Reality interface for controlling and monitoring a UAV swarm.**
-MSc Computer Science thesis, University of Bern (2026).
+**Control a simulated Crazyflie swarm from Unity — takeoff, land, go-to and formations — through a ROS 2 Jazzy + Crazyswarm2 backend.**
 
-A Unity XR application visualises a swarm of simulated Crazyflie quadrotors and lets the
-operator command them (takeoff, land, go-to, formations) through a ROS 2 backend. The
-backend runs [Crazyswarm2](https://github.com/IMRCLab/crazyswarm2) in simulation (the real
-Crazyflie firmware controller as software-in-the-loop) inside Docker, and exposes a small
-swarm API to Unity over rosbridge (WebSocket).
+![ROS 2 Jazzy](https://img.shields.io/badge/ROS%202-Jazzy-22314E?logo=ros)
+![Crazyswarm2](https://img.shields.io/badge/Crazyswarm2-sim-blue)
+![Unity](https://img.shields.io/badge/Unity-XR-black?logo=unity)
+![Docker](https://img.shields.io/badge/Docker-required-2496ED?logo=docker)
+![Level](https://img.shields.io/badge/level-intermediate-orange)
+
+This is a self-contained multi-robot lab project: a swarm of six simulated
+[Crazyflie](https://www.bitcraze.io/products/crazyflie-2-1/) quadrotors runs in
+[Crazyswarm2](https://github.com/IMRCLab/crazyswarm2) (the real Crazyflie firmware controller,
+software-in-the-loop) inside a Docker container, and a Unity application visualises the swarm in 3D
+and sends commands to it over [rosbridge](https://github.com/RobotWebTools/rosbridge_suite).
+
+Between the two sits a small **swarm API** (`swarm_control`) that turns high-level requests,
+such as *"fly a circle formation around (1, 0.5, 1)"*, into per-drone commands, and checks
+them against a safety layer (geofence, minimum separation, speed limit) before anything moves.
+
+
+
+<!-- Add a demo GIF here: ![demo](docs/media/demo.gif) -->
+
+---
+
+## Features
+
+- **Simulated multi-drone swarm:** six Crazyflies fly in Crazyswarm2's simulator, which runs the real Crazyflie firmware controller in software, all inside a Docker container with ROS 2 Jazzy. No hardware and no ROS install on the host are needed.
+- **Swarm control from Unity:** a 3D Unity scene connects over rosbridge, mirrors every drone live and sends commands to the whole swarm or to selected drones: takeoff, land, go-to, hover/stop.
+- **Formations:** line, grid, circle and V shapes around any centre point, with adjustable spacing and heading. Each drone gets its own slot, and the swarm arrives at the formation together.
+- **Safety and health monitoring:** every command is checked against a geofence, a minimum separation distance and a speed limit. `/swarm/state` streams position, battery, link quality, warnings and faults for each drone at 10 Hz, and drones with a fault are refused new commands.
+- **Autonomous end-to-end test flight:** `smoke_test` flies the whole mission without anyone at the controls (takeoff → grid → line → land). Along the way it injects faults (low battery, weak link, motor failure), checks that the system reacts correctly, and prints PASS/FAIL for each check. It finishes in about a minute and always leaves the swarm landed.
 
 ---
 
@@ -19,7 +42,7 @@ swarm API to Unity over rosbridge (WebSocket).
 │                          │     (rosbridge)     │                                              │
 │  • 3D swarm view         │                     │  rosbridge_server                            │
 │  • drone selection       │  /swarm/* services  │        │                                     │
-│  • MR command UI         │ ──────────────────▶ │  swarm_commander  (safety layer, formations) │
+│  • command UI            │ ──────────────────▶ │  swarm_commander  (safety layer, formations) │
 │                          │                     │        │  /cfN/takeoff|land|go_to            │
 │                          │  /swarm/state, /tf  │        ▼                                     │
 │                          │ ◀────────────────── │  Crazyswarm2 crazyflie_server (sim backend)  │
@@ -28,10 +51,15 @@ swarm API to Unity over rosbridge (WebSocket).
 
 | Layer | Runs on | Tech |
 |---|---|---|
-| XR app | Mac / Windows (Unity Editor) or XR headset | Unity, ROS# (ros-sharp) |
+| Visualisation + UI | Mac / Windows (Unity Editor) or XR headset | Unity, ROS# (ros-sharp) |
 | Bridge | backend machine | rosbridge_suite (WebSocket, port 9090) |
 | Swarm API | backend machine | `swarm_control` / `swarm_interfaces` (this repo) |
 | Simulation | backend machine | Crazyswarm2 `sim` backend + Crazyflie firmware bindings |
+
+**Command flow, briefly:** Unity calls a `/swarm/*` service → `swarm_commander` validates it against
+the safety limits and computes per-drone targets → it calls each drone's Crazyswarm2 services
+(`/cfN/takeoff`, `/cfN/go_to`, …) → the simulator flies the drones with the real firmware controller →
+poses come back on `/tf` and aggregated state on `/swarm/state` → Unity updates the 3D view.
 
 ---
 
@@ -69,69 +97,124 @@ XR-UAV-Swarm/
 
 ## Prerequisites
 
-**Backend machine** (tested: Ubuntu 22.04, RTX 5070 Ti)
-- Linux with [Docker Engine](https://docs.docker.com/engine/install/) (user in the `docker` group)
+**Backend machine** (tested on Ubuntu 22.04 with an RTX 5070 Ti)
+- Linux with [Docker Engine](https://docs.docker.com/engine/install/), with your user in the `docker` group
 - Optional: NVIDIA GPU + [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/install-guide.html) (only needed for RViz)
-- Nothing ROS-related is installed on the host — ROS 2 Jazzy runs inside the container, so the host OS version doesn't matter
+- No ROS installation on the host. ROS 2 Jazzy runs inside the container, so the host's Ubuntu version doesn't matter.
 
-**XR machine**
-- Unity Hub + the Unity version in [`unity/ProjectSettings/ProjectVersion.txt`](unity/ProjectSettings/ProjectVersion.txt)
-- [Git LFS](https://git-lfs.com) (binary assets are stored with LFS)
-- Same network as the backend machine
+**Visualisation machine** (can be the same machine)
+- Unity Hub + the Unity version listed in [`unity/ProjectSettings/ProjectVersion.txt`](unity/ProjectSettings/ProjectVersion.txt)
+- [Git LFS](https://git-lfs.com) (Unity binary assets are stored with LFS)
+- On the same network as the backend machine
 
 ---
 
 ## Installation
 
 ### 1. Clone
+
 ```bash
 git lfs install                       # once per machine
-git clone https://github.com/<your-user>/XR-UAV-Swarm.git
+git clone https://github.com/kavinaya2808/XR-UAV-Swarm.git
 cd XR-UAV-Swarm
 ```
-> Backend-only machine? Skip the Unity binaries with
-> `GIT_LFS_SKIP_SMUDGE=1 git clone ...`
+
+> **Backend-only machine?** Skip the Unity binaries:
+> `GIT_LFS_SKIP_SMUDGE=1 git clone https://github.com/kavinaya2808/XR-UAV-Swarm.git`
 
 ### 2. Backend (Linux)
+
 ```bash
 ./scripts/build_image.sh              # ~15–25 min the first time
 ./scripts/create_container.sh         # creates container "xr-swarm", mounts ros2_ws/
 ```
 
 ### 3. Unity
+
 1. Unity Hub → **Add project from disk** → select the `unity/` folder
 2. Open it with the Unity version from `ProjectVersion.txt` (packages restore on first open)
 3. Open the main scene in `Assets/Scenes/`
 
 ---
 
-## Running a session
+## Running
 
-**Terminal 1 — backend (sim + rosbridge + swarm commander)**
+**Terminal 1: bringup (Crazyswarm2 sim + rosbridge + swarm commander + telemetry)**
+
 ```bash
-./scripts/swarm_up.sh                 # prints the URL for Unity, e.g. ws://192.168.1.20:9090
-# options: ./scripts/swarm_up.sh rviz:=True   |   port:=9091   |   commander:=False
+./scripts/shell.sh                    # enter the container
+cd /root/ros2_ws
+colcon build --symlink-install        # first time only
+source install/setup.bash
+ros2 launch swarm_control swarm_bringup.launch.py
 ```
-First run builds `ros2_ws` automatically.
 
-**Unity** — set the **RosConnector → Ros Bridge Server Url** to the printed `ws://<backend-ip>:9090`, then press Play.
+Launch options: `rviz:=True` · `port:=9091` · `commander:=False` · `telemetry:=False`
 
-**Terminal 2 — commands / checks** (optional)
+> Shortcut: `./scripts/swarm_up.sh` does all of the above in one command from the host
+> and prints the WebSocket URL for Unity.
+
+**Unity:** set **RosConnector → Ros Bridge Server Url** to `ws://<backend-ip>:9090`, then press **Play**.
+The six drones should appear on the ground.
+
+**Terminal 2: autonomous test flight**
+
 ```bash
 ./scripts/shell.sh
+source /root/ros2_ws/install/setup.bash
+
+ros2 run swarm_control smoke_test                 # full run: flight + fault injection (~1 min)
+ros2 run swarm_control smoke_test --skip-faults   # flight checks only
+```
+
+Exit code `0` means every check passed. Run it with Unity open to watch the swarm fly.
+
+**Terminal 2: manual commands**
+
+```bash
 ros2 service call /swarm/takeoff   swarm_interfaces/srv/SwarmCommand "{}"
-ros2 service call /swarm/formation swarm_interfaces/srv/Formation "{shape: circle, center: {x: 1.0, y: 0.5, z: 1.0}}"
-ros2 service call /swarm/go_to     swarm_interfaces/srv/GoTo "{drone_ids: [cf1], targets: [{x: 0.5, y: -0.5, z: 1.0}]}"
+ros2 service call /swarm/formation swarm_interfaces/srv/Formation \
+  "{shape: circle, center: {x: 1.0, y: 0.5, z: 1.0}}"
+ros2 service call /swarm/go_to     swarm_interfaces/srv/GoTo \
+  "{drone_ids: [cf1], targets: [{x: 0.5, y: -0.5, z: 1.0}]}"
 ros2 topic echo /swarm/state --once
 ros2 service call /swarm/land      swarm_interfaces/srv/SwarmCommand "{}"
 ```
 
+**Unit tests** (pure Python, no ROS needed)
+
+```bash
+cd /root/ros2_ws/src/swarm_control
+python3 -m pytest -q test/
+```
+
 **After changing ROS code**
+
 ```bash
 ./scripts/shell.sh
 colcon build --symlink-install && source install/setup.bash
 ```
-(Python files and existing launch/config files are symlinked — no rebuild needed for edits to those. New files and `.msg/.srv` changes need a rebuild.)
+
+Python files and existing launch/config files are symlinked, so edits to them need no rebuild.
+New files and `.msg` / `.srv` changes do need a rebuild.
+
+---
+
+## Formations
+
+Formations are computed in `swarm_control/geometry.py` (pure Python, unit-tested in `test/`) and
+placed around a centre point with configurable spacing and heading.
+
+| Shape | Description |
+|---|---|
+| `line` | Drones in a straight row, perpendicular to the heading |
+| `grid` | Rectangular grid, filled row by row |
+| `circle` | Evenly spaced on a ring around the centre |
+| `v` | V / chevron shape pointing along the heading |
+
+Before any drone moves, every formation passes through the safety layer (geofence and minimum separation).
+If the requested spacing is too tight for the swarm size, the service returns `success: false`
+and a message explaining why.
 
 ---
 
@@ -147,40 +230,41 @@ colcon build --symlink-install && source install/setup.bash
 | `/swarm/state` | `swarm_interfaces/msg/SwarmState` (10 Hz) | Position, status, target, nearest neighbour per drone + separation warning |
 | `/tf` | `tf2_msgs/msg/TFMessage` | `world → cf1 … cfN` poses from the simulator |
 
-Every service returns `success` + `message` (e.g. *"cf1 and cf2 would be 0.05 m apart"*) so the UI can show feedback.
-
-**Safety layer** (`ros2_ws/src/swarm_control/config/swarm_commander.yaml`)
-- Flight volume: x −1…3 m, y −1…2 m, z 0.2…2 m — targets outside are clamped (or rejected with `fence_mode: reject`)
-- Minimum separation between planned positions: 0.3 m
-- Speed limit: 0.5 m/s; drones in one command arrive together
-- Only flying drones accept go-to / formation commands
-
-**Changing the swarm size:** add a new `config/crazyflies_<N>.yaml` (copy `crazyflies_6.yaml`), then
-`./scripts/swarm_up.sh crazyflies_yaml_file:=/root/ros2_ws/src/swarm_control/config/crazyflies_<N>.yaml`.
+Every service returns `success` + `message` so the UI can show the operator meaningful feedback.
 
 ---
 
-## Pinned versions
+## Safety layer
 
-| Component | Version |
-|---|---|
-| ROS 2 | Jazzy (`osrf/ros:jazzy-desktop`, Ubuntu 24.04 in the container) |
-| Crazyswarm2 | `f1e09954f56cd08e7d9aff5e13dc9a68795914a3` |
-| Crazyflie firmware | see `CF_FIRMWARE_REF` in `docker/Dockerfile` |
-| numpy | `< 2` (required by the sim backend) |
-| Unity | see `unity/ProjectSettings/ProjectVersion.txt` |
+Configured in `ros2_ws/src/swarm_control/config/swarm_commander.yaml`:
 
-To update Crazyswarm2 or the firmware: change the `ARG` in `docker/Dockerfile`, then
-`./scripts/build_image.sh && docker rm -f xr-swarm && ./scripts/create_container.sh`.
+- **Flight volume:** x −1…3 m, y −1…2 m, z 0.2…2 m. Targets outside are clamped, or rejected with `fence_mode: reject`.
+- **Minimum separation:** 0.3 m between planned positions.
+- **Speed limit:** 0.5 m/s. Drones in one command are timed to arrive together.
+- **State check:** only flying drones accept go-to / formation commands.
+
+---
+
+## Configuration
+
+**Change the swarm size:** copy `config/crazyflies_6.yaml` to `config/crazyflies_<N>.yaml`, edit the drone
+list and initial positions, then launch with:
+
+```bash
+./scripts/swarm_up.sh crazyflies_yaml_file:=/root/ros2_ws/src/swarm_control/config/crazyflies_<N>.yaml
+```
+
+**Tune limits and speeds:** edit `config/swarm_commander.yaml` (no rebuild needed thanks to `--symlink-install`;
+just restart `swarm_up.sh`).
 
 ---
 
 
 ## Acknowledgements
 
-- [Crazyswarm2](https://github.com/IMRCLab/crazyswarm2) (IMRCLab) — Crazyflie ROS 2 stack and simulator (MIT)
-- [Crazyflie firmware](https://github.com/bitcraze/crazyflie-firmware) (Bitcraze) — controller used in simulation (GPL-3.0)
-- [ROS#](https://github.com/siemens/ros-sharp) (Siemens) — Unity ↔ rosbridge client (Apache-2.0; licence kept in its folder under `unity/Assets`)
-- [rosbridge_suite](https://github.com/RobotWebTools/rosbridge_suite)
+- [Crazyswarm2](https://github.com/IMRCLab/crazyswarm2) (IMRCLab): Crazyflie ROS 2 stack and simulator (MIT)
+- [Crazyflie firmware](https://github.com/bitcraze/crazyflie-firmware) (Bitcraze): controller used in simulation (GPL-3.0)
+- [ROS#](https://github.com/siemens/ros-sharp) (Siemens): Unity ↔ rosbridge client (Apache-2.0; licence kept in its folder under `unity/Assets`)
+- [rosbridge_suite](https://github.com/RobotWebTools/rosbridge_suite): WebSocket bridge between ROS 2 and Unity
 
-
+---
